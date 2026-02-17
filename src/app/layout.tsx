@@ -1,13 +1,13 @@
-import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
-import "./globals.css";
+import type { Metadata } from 'next';
+import { Geist, Geist_Mono } from 'next/font/google';
+import './globals.css';
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
+const geist = Geist({ subsets: ['latin'], variable: '--font-sans' });
+const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-mono' });
 
 export const metadata: Metadata = {
-  title: "Doc to Markdown",
-  description: "Convert documentation sites into a single Markdown file for LLMs.",
+  title: 'Context - Docs to Markdown',
+  description: 'Turn any docs site into one clean Markdown file.',
 };
 
 export default function RootLayout({
@@ -17,7 +17,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.variable} ${mono.variable} bg-black text-white antialiased min-h-screen selection:bg-white/20`}>
+      <body className={`${geist.variable} ${geistMono.variable} bg-black text-white antialiased min-h-screen`}>
         {children}
       </body>
     </html>

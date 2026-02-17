@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
-import puppeteer from 'puppeteer';
+import puppeteer, { type Browser, type HTTPRequest } from 'puppeteer';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,13 +65,13 @@ class DocCrawler {
   private maxPages: number;
   private visited = new Set<string>();
   private queue: { url: string; depth: number }[] = [];
-  private results: any[] = [];
-  private errors: any[] = [];
+  private results: CrawlResult[] = [];
+  private errors: CrawlError[] = [];
   private turndownService = new TurndownService({ 
     headingStyle: 'atx', 
     codeBlockStyle: 'fenced' 
   });
-  private browser: any = null;
+  private browser: Browser | null = null;
 
   constructor(options: { maxDepth: number; maxPages: number }) {
     this.maxDepth = options.maxDepth;
@@ -148,46 +148,48 @@ class DocCrawler {
            }
         }
       }
-    } catch (e) {
+    } catch {
       // Fall through to browser
     }
 
     // 2. Fallback to Puppeteer
     console.log(`[Browser Fallback] Rendering ${url}`);
     
-    try {
-      await this.initBrowser();
-      const page = await this.browser.newPage();
+     try {
+       await this.initBrowser();
+       const browser = this.browser;
+       if (!browser) return null;
+       const page = await browser.newPage();
+       
+       await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
       
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-      
-      await page.setRequestInterception(true);
-      page.on('request', (req: any) => {
-        if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-          req.abort();
-        } else {
-          req.continue();
-        }
-      });
+       await page.setRequestInterception(true);
+       page.on('request', (req: HTTPRequest) => {
+         if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+           req.abort();
+         } else {
+           req.continue();
+         }
+       });
 
-      const response = await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
+       await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
       
       // Wait for Docusaurus/SPA content
       try {
         await page.waitForSelector('main, article, .content, #__docusaurus', { timeout: 5000 });
-      } catch (e) {
-        // Ignore timeout
-      }
+       } catch {
+         // Ignore timeout
+       }
 
       const content = await page.content();
       await page.close();
 
       return { type: 'html', content };
-    } catch (e) {
-      console.error(`Browser fetch failed for ${url}:`, e);
-      return null;
-    }
-  }
+     } catch (err) {
+       console.error(`Browser fetch failed for ${url}:`, err);
+       return null;
+     }
+   }
 
   private htmlToMarkdown(html: string, url: string): string {
     const $ = cheerio.load(html);
@@ -251,20 +253,20 @@ class DocCrawler {
         const batch = this.queue.splice(0, CONFIG.limits.maxConcurrency);
         
         // Sequential for browser stability
-        const items = [];
-        for (const { url, depth } of batch) {
-           const data = await this.fetchPage(url);
-           items.push({ url, depth, data });
-        }
+         const items: { url: string; depth: number; data: { type: 'markdown' | 'html'; content: string } | null }[] = [];
+         for (const { url, depth } of batch) {
+            const data = await this.fetchPage(url);
+            items.push({ url, depth, data });
+         }
 
         for (const { url, depth, data } of items) {
           if (!data) continue;
 
-          let markdown = "";
-          if (data.type === 'markdown') {
-            markdown = `\n\n<!-- Source: ${url} -->\n${data.content}`;
-          } else {
-            markdown = this.htmlToMarkdown(data.content, url);
+           let markdown = '';
+           if (data.type === 'markdown') {
+             markdown = `\n\n<!-- Source: ${url} -->\n${data.content}`;
+           } else {
+             markdown = this.htmlToMarkdown(data.content, url);
             
             if (depth < this.maxDepth) {
               const foundLinks = this.extractLinks(data.content, url);
@@ -277,24 +279,37 @@ class DocCrawler {
             }
           }
 
-          if (markdown.trim().length > 50) {
-              this.results.push({ 
-                  url, 
-                  depth, 
-                  filename: this.sanitizeFilename(url), 
-                  markdown, 
-                  size: markdown.length 
+           if (markdown.trim().length > 50) {
+              this.results.push({
+                url,
+                depth,
+                filename: this.sanitizeFilename(url),
+                markdown,
+                size: markdown.length,
               });
-          }
-        }
-      }
-    } finally {
-      await this.closeBrowser();
-    }
+           }
+         }
+       }
+     } finally {
+       await this.closeBrowser();
+     }
 
-    return { results: this.results, errors: this.errors, stats: { pagesFound: this.visited.size, pagesCrawled: this.results.length, errors: this.errors.length } };
-  }
+     return { results: this.results, errors: this.errors, stats: { pagesFound: this.visited.size, pagesCrawled: this.results.length, errors: this.errors.length } };
+   }
 }
+
+type CrawlResult = {
+  url: string;
+  depth: number;
+  filename: string;
+  markdown: string;
+  size: number;
+};
+
+type CrawlError = {
+  url: string;
+  error: string;
+};
 
 export async function POST(req: NextRequest) {
   const ip = getClientIP(req);
@@ -303,16 +318,16 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { url } = await req.json();
+    const { url, depth, maxPages } = await req.json();
     if (!url) return NextResponse.json({ error: 'URL required' }, { status: 400 });
 
     const crawler = new DocCrawler({
-      maxDepth: 1, 
-      maxPages: 20 
+      maxDepth: Math.min(Math.max(parseInt(depth) || 1, 1), CONFIG.limits.maxDepth),
+      maxPages: Math.min(Math.max(parseInt(maxPages) || 50, 1), CONFIG.limits.maxPages),
     });
 
-    const pages = await crawler.crawl(url);
-    const fullMarkdown = pages.results.map((p: any) => p.markdown).join('\n\n---\n\n');
+     const pages = await crawler.crawl(url);
+     const fullMarkdown = pages.results.map((p) => p.markdown).join('\n\n---\n\n');
 
     return NextResponse.json({ 
       markdown: fullMarkdown,
@@ -321,7 +336,8 @@ export async function POST(req: NextRequest) {
       source: url
     });
 
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+   } catch (error: unknown) {
+     const message = error instanceof Error ? error.message : 'Unknown error';
+     return NextResponse.json({ error: message }, { status: 500 });
+   }
 }
