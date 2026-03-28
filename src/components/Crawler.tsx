@@ -14,6 +14,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { addToHistory, getHistory, type CrawlHistoryEntry } from '@/lib/history';
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
@@ -191,8 +192,22 @@ export default function Crawler({
             } else if (eventType === 'complete') {
               completed = true;
               setProgress(100);
-              setData(parsed as unknown as CrawlData);
+              const crawlData = parsed as unknown as CrawlData;
+              setData(crawlData);
               setStatus('success');
+              // Save to history
+              try {
+                const hostname = new URL(url).hostname;
+                addToHistory({
+                  url,
+                  hostname,
+                  pageCount: crawlData.pageCount,
+                  sizeBytes: new Blob([crawlData.markdown]).size,
+                  method: crawlData.method || crawlData.source || 'unknown',
+                  durationMs: Date.now() - t0,
+                  crawledAt: new Date().toISOString(),
+                });
+              } catch {}
             } else if (eventType === 'error') {
               throw new Error((parsed.error as string) || 'Crawl failed');
             }
@@ -422,6 +437,51 @@ export default function Crawler({
             )}
           </AnimatePresence>
         </motion.form>
+
+        {/* ── Recent Crawls ── */}
+        <AnimatePresence>
+          {isIdle && (() => {
+            const history = getHistory();
+            if (history.length === 0) return null;
+            return (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3, delay: 0.4 }}
+                className="mt-10"
+              >
+                <p className="text-[10px] font-medium text-muted-foreground/25 uppercase tracking-[0.2em] mb-3">
+                  Recent
+                </p>
+                <div className="space-y-1.5">
+                  {history.slice(0, 5).map((entry) => (
+                    <button
+                      key={entry.url}
+                      type="button"
+                      onClick={() => {
+                        setUrl(entry.url);
+                        void handleCrawl(undefined, entry.url);
+                      }}
+                      className="w-full flex items-center justify-between px-4 py-2.5 rounded-lg border border-border/15 bg-white/[0.008] hover:border-border/30 hover:bg-white/[0.02] transition-all duration-200 group text-left"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <FileText className="w-3.5 h-3.5 text-muted-foreground/20 group-hover:text-muted-foreground/40 transition-colors flex-shrink-0" />
+                        <span className="text-xs text-muted-foreground/50 group-hover:text-foreground/60 transition-colors truncate">
+                          {entry.hostname}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px] text-muted-foreground/20 flex-shrink-0 ml-3">
+                        <span>{entry.pageCount}p</span>
+                        <span>{formatSize(entry.sizeBytes)}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            );
+          })()}
+        </AnimatePresence>
 
         {/* ── Progress ── */}
         <AnimatePresence>
