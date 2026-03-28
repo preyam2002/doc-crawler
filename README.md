@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Context — Documentation Crawler
 
-## Getting Started
+Transform any documentation website into a single, clean Markdown file. Supports Docusaurus, VitePress, Nextra, MkDocs, GitBook, ReadTheDocs, Sphinx, and more.
 
-First, run the development server:
+## Features
+
+- **Multi-strategy fetching** — cascading approach: direct Markdown → Jina Reader API → HTTP + Cheerio → Puppeteer browser rendering
+- **Real-time progress** — Server-Sent Events stream crawl status as pages are discovered and processed
+- **Smart extraction** — 55+ content selectors tuned for popular documentation platforms, strips nav/sidebar/footer automatically
+- **Configurable depth** — control crawl depth (1-2 levels) and max pages (1-50)
+- **Copy & download** — one-click copy to clipboard or download as `.md` file
+- **URL sharing** — paste any URL as a path (`/https://docs.example.com`) for instant crawling
+- **Rate limiting** — IP-based throttling (20 req/min, max 3 concurrent crawls)
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16, React 19, TypeScript |
+| Scraping | Puppeteer, Cheerio, Turndown |
+| Styling | Tailwind CSS v4, Motion |
+| External | Jina Reader API (fallback) |
+
+## Quick Start
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000), paste a documentation URL, and hit Enter.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## API
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### POST /api/crawl
 
-## Learn More
+**Request:**
+```json
+{
+  "url": "https://docs.example.com",
+  "depth": 2,
+  "maxPages": 25
+}
+```
 
-To learn more about Next.js, take a look at the following resources:
+**Response:** SSE stream with `progress`, `complete`, and `error` events.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Architecture
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+src/
+├── app/
+│   ├── api/crawl/route.ts    # DocCrawler class + SSE endpoint
+│   ├── [...url]/page.tsx     # URL sharing catch-all route
+│   ├── page.tsx              # Landing page
+│   └── globals.css           # Dark theme + animations
+├── components/
+│   └── Crawler.tsx           # Main UI (form, progress, preview)
+└── lib/
+    └── utils.ts              # Class name utilities
+```
 
-## Deploy on Vercel
+**Fetching cascade:**
+1. `tryDirectMd()` — attempt raw `.md` file fetch (5s timeout)
+2. `tryJinaReader()` — Jina AI reader API for clean extraction (15s timeout)
+3. `tryHttpFetch()` — plain HTTP + Cheerio HTML parsing (8s timeout)
+4. `tryPuppeteer()` — full browser rendering for JS-heavy sites (30s timeout)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## License
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT
+
+Built by [Preyam](https://github.com/preyam2002)
